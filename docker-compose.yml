@@ -1,0 +1,56 @@
+services:
+  # --- 1. Database ---
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: battle_v2
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d battle_v2"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- 2. Game Server ---
+  server:
+    build: .
+    command: uvicorn server.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://admin:password@db:5432/battle_v2
+      SECRET_KEY: "super_secret_dev_key"
+
+  # --- 3. Red Bot ---
+  bot_red:
+    build: .
+    # Override command to run the bot script
+    command: python client/bot.py
+    depends_on:
+      server:
+        condition: service_started
+    environment:
+      # These env vars would need to be read by your Bot class
+      SERVER_URL: http://server:8000
+      MATCH_ID: "m_debug_01"
+      BOT_TOKEN: "p_red_token"
+    restart: on-failure
+
+  # --- 4. Blue Bot ---
+  bot_blue:
+    build: .
+    command: python client/bot.py
+    depends_on:
+      server:
+        condition: service_started
+    environment:
+      SERVER_URL: http://server:8000
+      MATCH_ID: "m_debug_01"
+      BOT_TOKEN: "p_blue_token"
+    restart: on-failure

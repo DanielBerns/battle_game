@@ -1,16 +1,24 @@
-from fastapi import FastAPI, Depends, HTTPException
-from shared.schemas import OrderSubmission
+from fastapi import FastAPI
+from server.engine import GameEngine
+from shared.schemas import MatchStart, MapData, GameConstants
 
 app = FastAPI()
 
-@app.post("/match/{match_id}/orders")
-async def submit_orders(match_id: str, submission: OrderSubmission, user = Depends(get_current_user)):
-    # 1. Validate constraints (Max 50 orders)
-    # 2. Store in PostgreSQL 'pending_orders' column
-    # 3. Wait for tick processing (usually done by a background worker/celery)
-    pass
+# In-memory store for debug
+matches = {}
 
-@app.get("/match/{match_id}/state")
-async def get_state(match_id: str, tick: int):
-    # Return the 'state_tick' JSON diff
-    pass
+@app.get("/")
+def health_check():
+    return {"status": "ok"}
+
+@app.get("/match/{match_id}/start")
+def match_start(match_id: str):
+    # Stub response to let bots connect
+    return MatchStart(
+        match_id=match_id,
+        my_id="p_red", # Dynamic logic needed here based on token
+        map=MapData(width=10, height=10, static_terrain=[]),
+        constants=GameConstants()
+    )
+
+# ... add /state and /orders endpoints calling the Engine ...
