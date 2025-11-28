@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Battle Game v2.0 - Observer</title>
+    <style>
+        body { background: #1a1a1a; color: #eee; font-family: sans-serif; margin: 0; overflow: hidden; }
+        #ui-layer { position: absolute; top: 10px; left: 10px; pointer-events: none; }
+        .hud-panel { background: rgba(0,0,0,0.7); padding: 10px; border-radius: 4px; margin-bottom: 10px; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <div id="ui-layer">
+        <div class="hud-panel">
+            <h2>Match: <span id="match-id">m_debug_01</span></h2>
+            <div>Tick: <span id="tick-display">0</span></div>
+            <div>Status: <span id="status-display">WAITING</span></div>
+        </div>
+        <div class="hud-panel">
+            <div style="color: #ff4444;">Red Units: <span id="red-count">0</span></div>
+            <div style="color: #4444ff;">Blue Units: <span id="blue-count">0</span></div>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script src="render.js"></script>
+</body>
+</html>

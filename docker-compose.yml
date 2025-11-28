@@ -1,4 +1,5 @@
 services:
+  # --- 1. Database Server ---
   db:
       image: postgres:15-alpine
       environment:
@@ -55,3 +56,20 @@ services:
       MATCH_ID: "m_debug_01"
       BOT_TOKEN: "p_blue_token"
     restart: on-failure
+
+  # --- 5. Dashboard ---
+  dashboard:
+    image: node:18-alpine
+    working_dir: /app
+    volumes:
+      - ./dashboard:/app
+      - /app/node_modules
+    # Update the command below:
+    command: sh -c "npm install --no-package-lock && npm start"
+    ports:
+      - "3000:3000"
+    depends_on:
+      server:
+        condition: service_started
+    environment:
+      SERVER_URL: http://server:8000
