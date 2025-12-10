@@ -101,8 +101,8 @@ class MatchStart(BaseModel):
     See Spec Section 3.1
     """
     match_id: str
-    map: MapData
     my_id: str
+    map: MapData
     constants: GameConstants
 
 # --- 3.2 Game Loop (state_tick) ---

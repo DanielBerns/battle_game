@@ -48,6 +48,7 @@ class Bot:
         self.server_url = server_url
         self.match_id = match_id
         self.token = secret_token
+        logger.info(f"secret_token: {secret_token}")
         self.client = httpx.Client(base_url=server_url, timeout=5.0)
 
         self.engine = create_engine("sqlite:///:memory:")
@@ -95,10 +96,9 @@ class Bot:
 
                 self.last_tick = game_state.tick
                 logger.info(f"Processing Tick {game_state.tick}")
-
                 self._sync_state(game_state)
                 orders = self._logic(game_state.tick)
-
+                logger.info(f"len(orders) = {len(orders)}")
                 if orders:
                     submission = OrderSubmission(tick=game_state.tick + 1, orders=orders)
                     self.client.post(
@@ -121,9 +121,12 @@ class Bot:
     def _logic(self, current_tick: int):
         orders = []
         my_units = self.session.execute(select(LocalUnit).where(LocalUnit.owner == self.my_id)).scalars().all()
+        logger.info(f"len(my_units): {len(my_units)}")
         target_hex = Hex(0, 0) # Move to center
 
         for unit in my_units:
+            message = f"unit: id {unit.id} - owner {unit.owner} - {unit.type} - (Q: {unit.q}, R: {unit.r}) - Health {unit.hp} Movement {unit.mp}"
+            logger.info(message)
             if unit.mp <= 0: continue
             my_hex = Hex(unit.q, unit.r)
             if hex_distance(my_hex, target_hex) <= 1: continue
