@@ -59,13 +59,12 @@ services:
 
   # --- 5. Dashboard ---
   dashboard:
-    image: node:18-alpine
-    working_dir: /app
+    build: ./dashboard
     volumes:
-      - ./dashboard:/app
-      - /app/node_modules
-    # Update the command below:
-    command: sh -c "npm install --no-package-lock && npm start"
+      - ./dashboard:/app:z # Keep for live editing, add :z just in case
+      - /app/node_modules  # vital: preserves the installed modules from the image
+    # Remove the 'command' line entirely, or use:
+    # command: npm start
     ports:
       - "3000:3000"
     depends_on:

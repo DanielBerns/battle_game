@@ -1,6 +1,7 @@
 import time
 import os
 import httpx
+import logging
 from sqlalchemy import create_engine, Column, String, Integer, Float, select, delete
 from sqlalchemy.orm import declarative_base, Session
 
@@ -10,6 +11,25 @@ from shared.schemas import (
     GameState, MatchStart
 )
 from shared.hex_math import Hex, hex_distance, hex_neighbors
+from shared.unique_ids import unique_id
+
+# --- Logging Configuration ---
+# Configure the logger
+logger = logging.getLogger("battle_bot")
+logger.setLevel(logging.INFO)
+
+# Create handlers
+console_handler = logging.StreamHandler()
+file_handler = logging.FileHandler(f'client_{unique_id()}.log')
+
+# Create formatters and add to handlers
+log_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(log_format)
+file_handler.setFormatter(log_format)
+
+# Add handlers to the logger
+logger.addHandler(console_handler)
+logger.addHandler(file_handler)
 
 Base = declarative_base()
 
@@ -39,21 +59,24 @@ class Bot:
         self.last_tick = -1
 
     def start(self):
-        print(f"Connecting to match {self.match_id}...")
+        logger.info(f"Connecting to match {self.match_id}...")
         while True:
             try:
                 resp = self.client.get(f"/match/{self.match_id}/start", headers={"Authorization": self.token})
                 if resp.status_code == 200:
                     break
-            except:
+            except Exception as e:
+                # Log connection errors as debug to avoid cluttering logs during startup
+                logger.debug(f"Connection attempt failed: {e}")
                 pass
-            print("Waiting for server...")
+
+            logger.info("Waiting for server...")
             time.sleep(2)
 
         data = MatchStart(**resp.json())
         self.my_id = data.my_id
         self.map_data = data.map
-        print(f"Connected as {self.my_id}.")
+        logger.info(f"Connected as {self.my_id}.")
         self._run_loop()
 
     def _run_loop(self):
@@ -71,7 +94,7 @@ class Bot:
                     continue
 
                 self.last_tick = game_state.tick
-                print(f"Processing Tick {game_state.tick}")
+                logger.info(f"Processing Tick {game_state.tick}")
 
                 self._sync_state(game_state)
                 orders = self._logic(game_state.tick)
@@ -83,8 +106,9 @@ class Bot:
                         json=submission.model_dump(),
                         headers={"Authorization": self.token}
                     )
+                    logger.info(f"Submitted {len(orders)} orders for Tick {game_state.tick + 1}")
             except Exception as e:
-                print(f"Error: {e}")
+                logger.error(f"Error in game loop: {e}", exc_info=True)
                 time.sleep(1)
 
     def _sync_state(self, state: GameState):
@@ -122,6 +146,7 @@ if __name__ == "__main__":
     token = os.getenv("BOT_TOKEN", "p_guest")
 
     # Simple delay to ensure server is up
+    logger.info("Bot starting up, waiting 5s...")
     time.sleep(5)
 
     bot = Bot(server_url, match_id, token)
