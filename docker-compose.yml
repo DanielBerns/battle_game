@@ -1,22 +1,19 @@
 services:
-  # --- 1. Database Server ---
   db:
-      image: postgres:15-alpine
-      environment:
-        POSTGRES_USER: admin
-        POSTGRES_PASSWORD: password
-        POSTGRES_DB: battle_v2
-      ports:
-        - "5432:5432"
-      healthcheck:
-        # Simplified test string which works better across different Docker versions
-        test: ["CMD-SHELL", "pg_isready -U admin -d battle_v2"]
-        interval: 5s
-        timeout: 5s
-        retries: 20       # Increased from 5 to 20 (allows up to ~100s)
-        start_period: 10s # New: Gives it 10s grace before counting failures
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: battle_v2
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d battle_v2"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
 
-  # --- 2. Game Server ---
   server:
     build: .
     command: uvicorn server.main:app --host 0.0.0.0 --port 8000 --reload
@@ -25,46 +22,48 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ./configs:/server/configs:ro # Mount configs read-only
     environment:
       DATABASE_URL: postgresql+psycopg://admin:password@db:5432/battle_v2
-      SECRET_KEY: "super_secret_dev_key"
+      CONFIG_DIR: ./server/configs
 
-  # --- 3. Red Bot ---
+  # --- Bot Players ---
+  # To add more players, duplicate this block and update PLAYER_CONFIG_FILE
+
   bot_red:
     build: .
-    # Override command to run the bot script
     command: uv run client/client.py
     depends_on:
       server:
         condition: service_started
+    volumes:
+      - ./configs:/server/configs:ro
     environment:
-      # These env vars would need to be read by your Bot class
       SERVER_URL: http://server:8000
       MATCH_ID: "m_debug_01"
-      BOT_TOKEN: "p_red_token"
+      PLAYER_CONFIG_FILE: "./server/configs/p_red.json"
     restart: on-failure
 
-  # --- 4. Blue Bot ---
   bot_blue:
     build: .
     command: uv run client/client.py
     depends_on:
       server:
         condition: service_started
+    volumes:
+      - ./configs:/server/configs:ro
     environment:
       SERVER_URL: http://server:8000
       MATCH_ID: "m_debug_01"
-      BOT_TOKEN: "p_blue_token"
+      PLAYER_CONFIG_FILE: "./server/configs/p_blue.json"
     restart: on-failure
 
-  # --- 5. Dashboard ---
   dashboard:
     build: ./dashboard
     volumes:
-      - ./dashboard:/app:z # Keep for live editing, add :z just in case
-      - /app/node_modules  # vital: preserves the installed modules from the image
-    # Remove the 'command' line entirely, or use:
-    # command: npm start
+      - ./dashboard:/app:z
+      - /app/node_modules
     ports:
       - "3000:3000"
     depends_on:

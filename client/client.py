@@ -1,5 +1,9 @@
 import time
 import os
+
+import sys
+import json
+
 import httpx
 import logging
 from sqlalchemy import create_engine, Column, String, Integer, Float, select, delete
@@ -44,18 +48,30 @@ class LocalUnit(Base):
     mp = Column(Integer)
 
 class Bot:
-    def __init__(self, server_url: str, match_id: str, secret_token: str):
+    def __init__(self, server_url: str, match_id: str, config_file: str):
         self.server_url = server_url
         self.match_id = match_id
-        self.token = secret_token
-        logger.info(f"secret_token: {secret_token}")
-        self.client = httpx.Client(base_url=server_url, timeout=5.0)
 
+        # Load Config
+        self.config_file = config_file
+        try:
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+                self.token = config.get("token")
+                # Derive ID from filename (e.g., /app/configs/p_red.json -> p_red)
+                self.derived_id = os.path.splitext(os.path.basename(config_file))[0]
+        except Exception as e:
+            logger.error(f"Failed to load config file {config_file}: {e}")
+            sys.exit(1)
+
+        logger.info(f"Initialized Bot {self.derived_id} using config {config_file}")
+        self.client = httpx.Client(base_url=server_url, timeout=5.0)
         self.engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(self.engine)
         self.session = Session(self.engine)
 
-        self.my_id = None
+        parts = config_file.split(".")
+        self.my_id = parts[0] if parts else "p_unknown"
         self.map_data = None
         self.last_tick = -1
 
@@ -143,14 +159,18 @@ class Bot:
                 orders.append(Order(type=OrderType.MOVE, id=unit.id, dest=HexCoord(q=best_move.q, r=best_move.r)))
         return orders
 
+
 if __name__ == "__main__":
     server_url = os.getenv("SERVER_URL", "http://localhost:8000")
     match_id = os.getenv("MATCH_ID", "m_local")
-    token = os.getenv("BOT_TOKEN", "p_guest")
+    config_file = os.getenv("PLAYER_CONFIG_FILE")
 
-    # Simple delay to ensure server is up
+    if not config_file:
+        logger.error("PLAYER_CONFIG_FILE env var is required.")
+        sys.exit(1)
+
     logger.info("Bot starting up, waiting 5s...")
     time.sleep(5)
 
-    bot = Bot(server_url, match_id, token)
+    bot = Bot(server_url, match_id, config_file)
     bot.start()

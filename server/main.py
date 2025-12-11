@@ -12,25 +12,35 @@ from shared.schemas import (
 )
 from server.engine import GameEngine
 
-# --- Configuration Loading ---
+# --- Configuration Loading Helpers ---
 
-def load_json_config(filename: str):
-    path = os.path.join(os.path.dirname(__file__), filename)
+CONFIG_DIR = os.getenv("CONFIG_DIR", "configs")
+
+def load_game_config(match_id: str):
+    """Loads {match_id}.json to find player config filenames."""
+    path = os.path.join(CONFIG_DIR, f"{match_id}.json")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Game config not found: {path}")
+
     with open(path, 'r') as f:
         return json.load(f)
 
-# Load Players Configuration
-try:
-    PLAYERS_CONFIG = load_json_config("players.json")
-    # Create a quick lookup map: token -> player_id
-    TOKEN_TO_ID = {p["token"]: p["id"] for p in PLAYERS_CONFIG.get("players", [])}
-except Exception as e:
-    print(f"Warning: Could not load players.json: {e}")
-    TOKEN_TO_ID = {}
+def load_player_config(filename: str):
+    """Loads a player .json file to extract the token."""
+    path = os.path.join(CONFIG_DIR, filename)
+    with open(path, 'r') as f:
+        return json.load(f)
 
-# Load Game Parameters
+def get_player_id_from_filename(filename: str) -> str:
+    """Extracts 'p_red' from 'p_red.json'"""
+    return os.path.splitext(os.path.basename(filename))[0]
+
+# Load Game Parameters (Static Global)
 try:
-    GAME_PARAMS = load_json_config("parameters.json")
+    # Assuming parameters.json is still static for game rules
+    param_path = os.path.join(os.path.dirname(__file__), "parameters.json")
+    with open(param_path, 'r') as f:
+        GAME_PARAMS = json.load(f)
 except Exception as e:
     print(f"Warning: Could not load parameters.json: {e}")
     GAME_PARAMS = {
@@ -38,44 +48,46 @@ except Exception as e:
         "initial_units": []
     }
 
-# --- Global In-Memory Store ---
+# --- Global State ---
 games: Dict[str, GameEngine] = {}
 order_buffers: Dict[str, List[Order]] = {}
+# Map match_id -> { token -> player_id }
+match_auth_tables: Dict[str, Dict[str, str]] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # STARTUP: Launch the background ticker
     task = asyncio.create_task(game_ticker())
     yield
-    # SHUTDOWN
     task.cancel()
 
 app = FastAPI(lifespan=lifespan)
 
 async def game_ticker():
-    """
-    The Heartbeat: Advances all active games by 1 tick every second.
-    """
     print("--- Game Ticker Started ---")
     while True:
-        await asyncio.sleep(1.0) # 1 Tick = 1 Second
-
-        # Iterate over all active matches
+        await asyncio.sleep(1.0)
         for match_id, engine in games.items():
-            # 1. Get queued orders for this tick
             current_orders = order_buffers.get(match_id, [])
-
-            # 2. Process the tick (Movement -> Combat)
             new_state = engine.process_tick(engine.current_state, current_orders)
-
-            # 3. Update the engine state
             engine.current_state = new_state
-
-            # 4. Clear the buffer for the next tick
             order_buffers[match_id] = []
 
             if new_state.tick % 5 == 0:
-                print(f"Match {match_id}: Tick {new_state.tick} processed. Units: {len(new_state.you.units)}")
+                print(f"Match {match_id}: Tick {new_state.tick} processed.")
+
+# --- Helper: Authentication ---
+
+def get_player_from_token(match_id: str, token: str) -> str:
+    """Resolves token to player_id for a specific match."""
+    # 1. Observer check
+    if not token or token == "observer":
+        return "p_observer"
+
+    # 2. Check loaded match auth
+    if match_id in match_auth_tables:
+        return match_auth_tables[match_id].get(token, "p_observer")
+
+    return "p_observer"
 
 @app.get("/")
 def health_check():
@@ -83,70 +95,63 @@ def health_check():
 
 @app.get("/match/{match_id}/start")
 def match_start(match_id: str, request: Request):
-    """
-    Initializes a match if it doesn't exist.
-    Identifies the player based on the Authorization header.
-    """
-    # 1. Identify Player
-    token = request.headers.get("Authorization")
-    player_id = TOKEN_TO_ID.get(token, "p_observer")
-
-    # 2. Initialize Match if needed
+    # 1. Lazy Load Match Configuration if not active
     if match_id not in games:
-        print(f"Initializing Match: {match_id} with params from config.")
-        engine = GameEngine(match_id)
+        print(f"Initializing Match: {match_id} from config file.")
+        try:
+            game_config = load_game_config(match_id)
 
-        # Load resources from config
-        res_cfg = GAME_PARAMS.get("resources", {})
-        resources = Resources(
-            M=res_cfg.get("M", 0),
-            F=res_cfg.get("F", 0),
-            I=res_cfg.get("I", 0)
-        )
+            # Build Auth Table for this match
+            auth_table = {}
+            for p_file in game_config.get("players", []):
+                p_data = load_player_config(p_file)
+                p_id = get_player_id_from_filename(p_file)
+                p_token = p_data.get("token")
+                if p_token:
+                    auth_table[p_token] = p_id
 
-        # Load units from config
-        initial_units = []
-        for u in GAME_PARAMS.get("initial_units", []):
-            try:
-                # Convert string type to Enum
-                u_type = UnitType(u["type"])
-                unit = UnitState(
-                    id=u["id"],
-                    type=u_type,
-                    q=u["q"],
-                    r=u["r"],
-                    hp=u["hp"],
-                    mp=u["mp"],
-                    owner=u["owner"]
-                )
-                initial_units.append(unit)
-            except ValueError as e:
-                print(f"Error loading unit {u.get('id')}: {e}")
+            match_auth_tables[match_id] = auth_table
 
-        engine.current_state = GameState(
-            tick=0,
-            game_status="ACTIVE",
-            you={
-                "resources": resources,
-                "units": initial_units,
-                "facilities": []
-            },
-            visible_changes={"units": [], "control_updates": []},
-            events=[]
-        )
+            # Initialize Engine
+            engine = GameEngine(match_id)
 
-        games[match_id] = engine
-        order_buffers[match_id] = []
+            # Load initial state from parameters.json
+            res_cfg = GAME_PARAMS.get("resources", {})
+            resources = Resources(M=res_cfg.get("M", 0), F=res_cfg.get("F", 0), I=res_cfg.get("I", 0))
 
-    # 3. Return Match Data
+            initial_units = []
+            for u in GAME_PARAMS.get("initial_units", []):
+                try:
+                    initial_units.append(UnitState(
+                        id=u["id"], type=UnitType(u["type"]),
+                        q=u["q"], r=u["r"], hp=u["hp"], mp=u["mp"], owner=u["owner"]
+                    ))
+                except Exception as e:
+                    print(f"Error loading unit {u}: {e}")
+
+            engine.current_state = GameState(
+                tick=0, game_status="ACTIVE",
+                you={"resources": resources, "units": initial_units, "facilities": []},
+                visible_changes={"units": [], "control_updates": []}, events=[]
+            )
+
+            games[match_id] = engine
+            order_buffers[match_id] = []
+
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=f"Config not found: {e}")
+        except Exception as e:
+            print(f"Failed to start match: {e}")
+            raise HTTPException(status_code=500, detail="Internal Server Error during init")
+
+    # 2. Authenticate Request
+    token = request.headers.get("Authorization")
+    player_id = get_player_from_token(match_id, token)
+
     return MatchStart(
         match_id=match_id,
-        my_id=player_id, # Dynamically assigned from token
-        map=MapData(
-            width=20,
-            height=20,
-            static_terrain=[]
-        ),
+        my_id=player_id,
+        map=MapData(width=20, height=20, static_terrain=[]),
         constants=GameConstants()
     )
 
@@ -155,33 +160,23 @@ def get_state(match_id: str, request: Request):
     if match_id not in games:
         raise HTTPException(status_code=404, detail="Match not found")
 
-    # 1. Identify Player
     token = request.headers.get("Authorization")
-    player_id = TOKEN_TO_ID.get(token, "p_observer")
+    player_id = get_player_from_token(match_id, token)
 
     global_state = games[match_id].current_state
 
-    # If observer (Dashboard), return full state so it can see everything
+    # Observer sees everything
     if player_id == "p_observer":
         return global_state
 
-    # 2. Filter Units for Players
-    my_units = []
-    visible_enemies = []
+    # Filter for player
+    my_units = [u for u in global_state.you.units if u.owner == player_id]
+    # Simple FoW stub: see all enemies (refine logic as needed)
+    visible_enemies = [u for u in global_state.you.units if u.owner != player_id]
 
-    for unit in global_state.you.units:
-        if unit.owner == player_id:
-            my_units.append(unit)
-        else:
-            visible_enemies.append(unit)
-
-    # 3. Construct Player View
-    # We copy the global state structure but replace the lists with filtered versions
     player_view = global_state.model_copy()
-
     player_view.you = global_state.you.model_copy()
     player_view.you.units = my_units
-
     player_view.visible_changes = global_state.visible_changes.model_copy()
     player_view.visible_changes.units = visible_enemies
 
@@ -196,5 +191,4 @@ def submit_orders(match_id: str, submission: OrderSubmission):
         order_buffers[match_id] = []
 
     order_buffers[match_id].extend(submission.orders)
-
     return {"status": "queued", "count": len(submission.orders)}
