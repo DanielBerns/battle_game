@@ -18,20 +18,16 @@ from shared.hex_math import Hex, hex_distance, hex_neighbors
 from shared.unique_ids import unique_id
 
 # --- Logging Configuration ---
-# Configure the logger
 logger = logging.getLogger("battle_bot")
 logger.setLevel(logging.INFO)
 
-# Create handlers
 console_handler = logging.StreamHandler()
 file_handler = logging.FileHandler(f'client_{unique_id()}.log')
 
-# Create formatters and add to handlers
 log_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 console_handler.setFormatter(log_format)
 file_handler.setFormatter(log_format)
 
-# Add handlers to the logger
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
 
@@ -52,13 +48,11 @@ class Bot:
         self.server_url = server_url
         self.match_id = match_id
 
-        # Load Config
         self.config_file = config_file
         try:
             with open(config_file, 'r') as f:
                 config = json.load(f)
                 self.token = config.get("token")
-                # Derive ID from filename (e.g., /app/configs/p_red.json -> p_red)
                 self.derived_id = os.path.splitext(os.path.basename(config_file))[0]
         except Exception as e:
             logger.error(f"Failed to load config file {config_file}: {e}")
@@ -83,7 +77,6 @@ class Bot:
                 if resp.status_code == 200:
                     break
             except Exception as e:
-                # Log connection errors as debug to avoid cluttering logs during startup
                 logger.debug(f"Connection attempt failed: {e}")
                 pass
 
@@ -99,7 +92,6 @@ class Bot:
     def _run_loop(self):
         while True:
             try:
-                # FIX: Add headers={"Authorization": self.token} to identify the bot
                 state_resp = self.client.get(f"/match/{self.match_id}/state", headers={"Authorization": self.token})
                 if state_resp.status_code != 200:
                     time.sleep(1)
@@ -114,7 +106,8 @@ class Bot:
                 self.last_tick = game_state.tick
                 logger.info(f"Processing Tick {game_state.tick}")
                 self._sync_state(game_state)
-                orders = self._logic(game_state.tick)
+                # Pass the full game_state to logic now
+                orders = self._logic(game_state)
                 logger.info(f"len(orders) = {len(orders)}")
                 if orders:
                     submission = OrderSubmission(tick=game_state.tick + 1, orders=orders)
@@ -135,8 +128,18 @@ class Bot:
             self.session.add(unit)
         self.session.commit()
 
-    def _logic(self, current_tick: int):
+    def _logic(self, game_state: GameState):
         orders = []
+
+        # --- Research Logic ---
+        resources = game_state.you.resources
+        upgrades = game_state.you.unlocked_upgrades
+
+        if resources.I >= 200 and "INFANTRY_TIER_1" not in upgrades:
+            logger.info("Submitting Research Order: INFANTRY_TIER_1")
+            orders.append(Order(type=OrderType.RESEARCH, tech_id="INFANTRY_TIER_1"))
+
+        # --- Movement Logic ---
         my_units = self.session.execute(select(LocalUnit).where(LocalUnit.owner == self.my_id)).scalars().all()
         logger.info(f"len(my_units): {len(my_units)}")
         target_hex = Hex(0, 0) # Move to center
@@ -159,19 +162,3 @@ class Bot:
             if best_move:
                 orders.append(Order(type=OrderType.MOVE, id=unit.id, dest=HexCoord(q=best_move.q, r=best_move.r)))
         return orders
-
-
-if __name__ == "__main__":
-    server_url = os.getenv("SERVER_URL", "http://localhost:8000")
-    match_id = os.getenv("MATCH_ID", "m_local")
-    config_file = os.getenv("PLAYER_CONFIG_FILE")
-
-    if not config_file:
-        logger.error("PLAYER_CONFIG_FILE env var is required.")
-        sys.exit(1)
-
-    logger.info("Bot starting up, waiting 5s...")
-    time.sleep(5)
-
-    bot = Bot(server_url, match_id, config_file)
-    bot.start()

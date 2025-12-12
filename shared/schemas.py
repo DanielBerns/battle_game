@@ -1,35 +1,7 @@
+import uuid
 from enum import Enum
 from typing import List, Optional, Dict, Literal, Union
 from pydantic import BaseModel, Field, field_validator
-
-class HexCoord(BaseModel):
-    q: int
-    r: int
-
-    def __hash__(self):
-        return hash((self.q, self.r))
-
-class UnitState(BaseModel):
-    id: str
-    owner_id: str
-    type: str # "Armored", "Scout", etc.
-    hp: float
-    mp: int
-    coords: HexCoord
-
-class GameState(BaseModel):
-    tick: int
-    units: List[UnitState]
-    map_bounds: tuple[int, int]
-    # ... resources, facilities ...
-
-class Order(BaseModel):
-    type: Literal["MOVE", "BUILD"]
-    unit_id: Optional[str] = None
-    fac_id: Optional[str] = None
-    dest: Optional[HexCoord] = None
-    build_type: Optional[str] = None
-
 
 # --- Enums (Strict Vocabulary) ---
 
@@ -50,21 +22,18 @@ class UnitType(str, Enum):
     SPECIAL_FORCES = "Special Forces"
 
 class GameStatus(str, Enum):
-    WAITING = "WAITING"  # <--- NEW
+    WAITING = "WAITING"
     ACTIVE = "ACTIVE"
     FINISHED = "FINISHED"
 
 class OrderType(str, Enum):
     MOVE = "MOVE"
     BUILD = "BUILD"
+    RESEARCH = "RESEARCH"  # <--- NEW
 
 # --- Basic Primitives ---
 
 class HexCoord(BaseModel):
-    """
-    Data Transfer Object for Hex coordinates.
-    Maps to {"q": int, "r": int} JSON.
-    """
     q: int
     r: int
 
@@ -75,9 +44,9 @@ class HexCoord(BaseModel):
         return self.q == other.q and self.r == other.r
 
 class Resources(BaseModel):
-    M: int = 0 # Materials
-    F: int = 0 # Fuel
-    I: int = 0 # Intel
+    M: int = 0
+    F: int = 0
+    I: int = 0
 
 # --- 3.1 Initialization (match_start) ---
 
@@ -94,13 +63,8 @@ class MapData(BaseModel):
 class GameConstants(BaseModel):
     def_constant: int = 25
     max_rounds: int = 3
-    # Add other balancing constants here if needed
 
 class MatchStart(BaseModel):
-    """
-    Sent once at the start of the game.
-    See Spec Section 3.1
-    """
     match_id: str
     my_id: str
     map: MapData
@@ -114,15 +78,15 @@ class UnitState(BaseModel):
     q: int
     r: int
     hp: float
-    mp: int # Current Movement Points
-    owner: Optional[str] = None # Optional because 'you' list implies owner, enemies need it explicit
+    mp: int
+    owner: Optional[str] = None
 
 class FacilityState(BaseModel):
     id: str
     q: int
     r: int
     owner: Optional[str] = None
-    queue: List[str] = [] # List of UnitTypes being built
+    queue: List[str] = []
 
 class ControlUpdate(BaseModel):
     q: int
@@ -136,24 +100,21 @@ class CombatDetails(BaseModel):
     casualties: List[str]
 
 class Event(BaseModel):
-    type: Literal["COMBAT", "CAPTURE", "ELIMINATION"]
+    type: Literal["COMBAT", "CAPTURE", "ELIMINATION", "RESEARCH"] # Added RESEARCH event type if needed
     loc: HexCoord
     details: Union[CombatDetails, Dict]
 
 class VisibleChanges(BaseModel):
-    units: List[UnitState] # Enemies seen this tick
-    control_updates: List[ControlUpdate] # Hexes that changed hands
+    units: List[UnitState]
+    control_updates: List[ControlUpdate]
 
 class PlayerState(BaseModel):
     resources: Resources
     units: List[UnitState]
     facilities: List[FacilityState]
+    unlocked_upgrades: List[str] = [] # <--- NEW
 
 class GameState(BaseModel):
-    """
-    Sent every tick. Contains dynamic data.
-    See Spec Section 3.2
-    """
     tick: int
     game_status: GameStatus
     you: PlayerState
@@ -162,16 +123,23 @@ class GameState(BaseModel):
 
 # --- 3.3 Orders (submit_orders) ---
 
+class ResearchOrder(BaseModel): # <--- NEW MODEL
+    type: Literal[OrderType.RESEARCH]
+    tech_id: str
+
 class Order(BaseModel):
     type: OrderType
 
     # MOVE specific
-    id: Optional[str] = None # Unit ID
+    id: Optional[str] = None
     dest: Optional[HexCoord] = None
 
     # BUILD specific
     fac_id: Optional[str] = None
     unit: Optional[UnitType] = None
+
+    # RESEARCH specific
+    tech_id: Optional[str] = None # <--- NEW
 
     @field_validator('dest')
     def validate_move(cls, v, values):
@@ -185,12 +153,14 @@ class Order(BaseModel):
             raise ValueError('BUILD order requires a unit type')
         return v
 
+    @field_validator('tech_id')
+    def validate_research(cls, v, values):
+        if values.data.get('type') == OrderType.RESEARCH and v is None:
+            raise ValueError('RESEARCH order requires a tech_id')
+        return v
+
 class OrderSubmission(BaseModel):
-    """
-    The payload sent by the client every tick.
-    See Spec Section 3.3
-    """
-    tick: int # Must match Server Tick + 1
+    tick: int
     orders: List[Order]
 
     @field_validator('orders')
