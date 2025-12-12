@@ -155,6 +155,7 @@ def match_start(match_id: str, request: Request):
         constants=GameConstants()
     )
 
+
 @app.get("/match/{match_id}/state")
 def get_state(match_id: str, request: Request):
     if match_id not in games:
