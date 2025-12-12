@@ -50,6 +50,7 @@ class UnitType(str, Enum):
     SPECIAL_FORCES = "Special Forces"
 
 class GameStatus(str, Enum):
+    WAITING = "WAITING"  # <--- NEW
     ACTIVE = "ACTIVE"
     FINISHED = "FINISHED"
 

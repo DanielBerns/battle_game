@@ -6,7 +6,7 @@
     <style>
         body { background: #1a1a1a; color: #eee; font-family: sans-serif; margin: 0; overflow: hidden; }
         #ui-layer { position: absolute; top: 10px; left: 10px; pointer-events: none; }
-        .hud-panel { background: rgba(0,0,0,0.7); padding: 10px; border-radius: 4px; margin-bottom: 10px; }
+        .hud-panel { background: rgba(0,0,0,0.7); padding: 10px; border-radius: 4px; margin-bottom: 10px; pointer-events: auto; }
         canvas { display: block; }
     </style>
 </head>
@@ -16,6 +16,7 @@
             <h2>Match: <span id="match-id">m_debug_01</span></h2>
             <div>Tick: <span id="tick-display">0</span></div>
             <div>Status: <span id="status-display">WAITING</span></div>
+            <button id="start-btn" style="margin-top:10px; padding:5px 10px; cursor:pointer;">Start Game</button>
         </div>
         <div class="hud-panel">
             <div style="color: #ff4444;">Red Units: <span id="red-count">0</span></div>

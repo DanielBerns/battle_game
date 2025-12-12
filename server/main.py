@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from shared.schemas import (
     MatchStart, MapData, GameConstants, GameState,
     OrderSubmission, Order, UnitState, HexCoord, Resources,
-    UnitType
+    UnitType, GameStatus
 )
 from server.engine import GameEngine
 
@@ -67,6 +67,9 @@ async def game_ticker():
     while True:
         await asyncio.sleep(1.0)
         for match_id, engine in games.items():
+            # NEW: Only process tick if game is ACTIVE
+            if engine.current_state.game_status != GameStatus.ACTIVE:
+                continue
             current_orders = order_buffers.get(match_id, [])
             new_state = engine.process_tick(engine.current_state, current_orders)
             engine.current_state = new_state
@@ -129,8 +132,9 @@ def match_start(match_id: str, request: Request):
                 except Exception as e:
                     print(f"Error loading unit {u}: {e}")
 
+            # NEW: Initialize with WAITING instead of ACTIVE
             engine.current_state = GameState(
-                tick=0, game_status="ACTIVE",
+                tick=0, game_status=GameStatus.WAITING,
                 you={"resources": resources, "units": initial_units, "facilities": []},
                 visible_changes={"units": [], "control_updates": []}, events=[]
             )
@@ -193,3 +197,12 @@ def submit_orders(match_id: str, submission: OrderSubmission):
 
     order_buffers[match_id].extend(submission.orders)
     return {"status": "queued", "count": len(submission.orders)}
+
+@app.post("/match/{match_id}/start")
+def start_match(match_id: str):
+    if match_id not in games:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    games[match_id].current_state.game_status = GameStatus.ACTIVE
+    print(f"Match {match_id} STARTED by Dashboard!")
+    return {"status": "started"}

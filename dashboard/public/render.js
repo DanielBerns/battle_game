@@ -20,6 +20,23 @@ function loop() {
     requestAnimationFrame(loop);
 }
 
+// ... existing code ...
+
+// NEW: Add Event Listener
+document.getElementById('start-btn').addEventListener('click', async () => {
+    try {
+        const res = await fetch(`/api/match/${MATCH_ID}/start`, { method: 'POST' });
+        if (res.ok) {
+            console.log("Game Start Triggered");
+        } else {
+            console.error("Failed to start game");
+        }
+    } catch (err) {
+        console.error("Error sending start command:", err);
+    }
+});
+
+
 async function update() {
     try {
         // Fetch latest state from our Proxy
@@ -31,6 +48,11 @@ async function update() {
             // Update HUD
             document.getElementById('tick-display').innerText = data.tick;
             document.getElementById('status-display').innerText = data.game_status;
+
+            // Hide start button if Active
+            if (data.game_status === 'ACTIVE') {
+                document.getElementById('start-btn').style.display = 'none';
+            }
 
             // Count units (Assuming all visible for observer)
             // Note: In real app, you might need a special 'observer' endpoint to see all
