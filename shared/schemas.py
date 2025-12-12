@@ -3,7 +3,7 @@ from enum import Enum
 from typing import List, Optional, Dict, Literal, Union
 from pydantic import BaseModel, Field, field_validator
 
-# --- Enums (Strict Vocabulary) ---
+# --- Enums ---
 
 class TerrainType(str, Enum):
     PLAINS = "Plains"
@@ -29,7 +29,7 @@ class GameStatus(str, Enum):
 class OrderType(str, Enum):
     MOVE = "MOVE"
     BUILD = "BUILD"
-    RESEARCH = "RESEARCH"  # <--- NEW
+    RESEARCH = "RESEARCH"
 
 # --- Basic Primitives ---
 
@@ -48,7 +48,13 @@ class Resources(BaseModel):
     F: int = 0
     I: int = 0
 
-# --- 3.1 Initialization (match_start) ---
+# --- API Payloads ---
+
+class GameInitRequest(BaseModel): # <--- NEW
+    match_id: str
+    initial_resources: Resources
+
+# --- Initialization ---
 
 class StaticTerrain(BaseModel):
     q: int
@@ -70,7 +76,7 @@ class MatchStart(BaseModel):
     map: MapData
     constants: GameConstants
 
-# --- 3.2 Game Loop (state_tick) ---
+# --- State ---
 
 class UnitState(BaseModel):
     id: str
@@ -100,7 +106,7 @@ class CombatDetails(BaseModel):
     casualties: List[str]
 
 class Event(BaseModel):
-    type: Literal["COMBAT", "CAPTURE", "ELIMINATION", "RESEARCH"] # Added RESEARCH event type if needed
+    type: Literal["COMBAT", "CAPTURE", "ELIMINATION", "RESEARCH", "BUILD"]
     loc: HexCoord
     details: Union[CombatDetails, Dict]
 
@@ -112,7 +118,7 @@ class PlayerState(BaseModel):
     resources: Resources
     units: List[UnitState]
     facilities: List[FacilityState]
-    unlocked_upgrades: List[str] = [] # <--- NEW
+    unlocked_upgrades: List[str] = []
 
 class GameState(BaseModel):
     tick: int
@@ -121,25 +127,21 @@ class GameState(BaseModel):
     visible_changes: VisibleChanges
     events: List[Event]
 
-# --- 3.3 Orders (submit_orders) ---
-
-class ResearchOrder(BaseModel): # <--- NEW MODEL
-    type: Literal[OrderType.RESEARCH]
-    tech_id: str
+# --- Orders ---
 
 class Order(BaseModel):
     type: OrderType
 
-    # MOVE specific
+    # MOVE
     id: Optional[str] = None
     dest: Optional[HexCoord] = None
 
-    # BUILD specific
+    # BUILD
     fac_id: Optional[str] = None
     unit: Optional[UnitType] = None
 
-    # RESEARCH specific
-    tech_id: Optional[str] = None # <--- NEW
+    # RESEARCH
+    tech_id: Optional[str] = None
 
     @field_validator('dest')
     def validate_move(cls, v, values):
