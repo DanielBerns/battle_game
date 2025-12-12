@@ -2,8 +2,21 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
 // --- Config ---
-const MATCH_ID = 'm_debug_01'; // Default match
-const HEX_SIZE = 20; // Radius of hex
+// Parse URL parameters to allow dynamic configuration
+const urlParams = new URLSearchParams(window.location.search);
+
+// 1. MATCH_ID: defaults to 'm_debug_01' if not specified in URL
+const MATCH_ID = urlParams.get('match_id') || 'm_debug_01';
+
+// 2. HEX_SIZE: defaults to 20 if not specified
+const HEX_SIZE = parseInt(urlParams.get('hex_size')) || 20;
+
+// Update the HTML UI to reflect the active Match ID
+const matchIdSpan = document.getElementById('match-id');
+if (matchIdSpan) {
+    matchIdSpan.innerText = MATCH_ID;
+}
+
 const SQRT3 = Math.sqrt(3);
 // Layout: Pointy-topped
 const HEX_WIDTH = SQRT3 * HEX_SIZE;
@@ -12,6 +25,7 @@ const HEX_HEIGHT = 2 * HEX_SIZE;
 // --- State ---
 let gameState = null;
 let camera = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+
 
 // --- Main Loop ---
 function loop() {
