@@ -8,37 +8,37 @@
     {
       "id": "u_red_1",
       "type": "Chief",
-      "q": 0,
-      "r": 0,
-      "hp": 140,
-      "mp": 6,
+      "q": -3,
+      "r": -3,
+      "hp": 120,
+      "mp": 10,
       "owner": "p_red"
     },
     {
       "id": "u_red_2",
       "type": "Armored",
-      "q": 2,
-      "r": 0,
-      "hp": 100,
-      "mp": 6,
+      "q": -2,
+      "r": -2,
+      "hp": 120,
+      "mp": 10,
       "owner": "p_red"
     },
     {
       "id": "u_blue_1",
       "type": "Chief",
-      "q": 0,
-      "r": 2,
+      "q": 3,
+      "r": 3,
       "hp": 120,
-      "mp": 6,
+      "mp": 10,
       "owner": "p_blue"
     },
     {
       "id": "u_blue_2",
       "type": "Armored",
-      "q": 0,
-      "r": 4,
+      "q": 2,
+      "r": 2,
       "hp": 120,
-      "mp": 6,
+      "mp": 10,
       "owner": "p_blue"
     }
   ]
