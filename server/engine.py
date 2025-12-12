@@ -53,7 +53,41 @@ class GameEngine:
         # 4. Combat Resolution ("EHP Model")
         self._resolve_combat(next_state, unit_positions)
 
+        # 5. Victory Check (Win/Draw Conditions)
+        self._check_victory(next_state)
+
         return next_state
+
+    def _check_victory(self, state: GameState):
+        """
+        Checks for elimination conditions and updates GameStatus if the match is over.
+        """
+        # Count active chiefs by owner
+        active_chiefs = set()
+
+        for unit in state.you.units:
+            if unit.type == UnitType.CHIEF:
+                active_chiefs.add(unit.owner)
+
+        # Condition 1: Draw (All Chiefs dead - Mutual Annihilation)
+        if not active_chiefs:
+            state.game_status = GameStatus.FINISHED
+            state.events.append(Event(
+                type="ELIMINATION",
+                loc=HexCoord(q=0, r=0),
+                details={"result": "DRAW", "reason": "Mutual Annihilation"}
+            ))
+            return
+
+        # Condition 2: Win (Only 1 Chief remains - Last Man Standing)
+        if len(active_chiefs) == 1:
+            winner = list(active_chiefs)[0]
+            state.game_status = GameStatus.FINISHED
+            state.events.append(Event(
+                type="ELIMINATION",
+                loc=HexCoord(q=0, r=0),
+                details={"result": "WIN", "winner": winner}
+            ))
 
     # --- 2.4 Movement Logic ---
 
