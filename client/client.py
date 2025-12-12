@@ -99,7 +99,8 @@ class Bot:
     def _run_loop(self):
         while True:
             try:
-                state_resp = self.client.get(f"/match/{self.match_id}/state")
+                # FIX: Add headers={"Authorization": self.token} to identify the bot
+                state_resp = self.client.get(f"/match/{self.match_id}/state", headers={"Authorization": self.token})
                 if state_resp.status_code != 200:
                     time.sleep(1)
                     continue
