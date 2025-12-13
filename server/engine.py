@@ -21,6 +21,13 @@ UNIT_COSTS = {
     UnitType.SPECIAL_FORCES: {"M": 80, "F": 0, "I": 30},
 }
 
+# Upkeep per 10 ticks
+UNIT_UPKEEP = {
+    UnitType.ARMORED: 4,
+    UnitType.MECHANIZED: 6
+}
+RESEARCH_COST = 200
+
 class GameEngine:
     def __init__(self, match_id: str):
         self.match_id = match_id
@@ -75,6 +82,9 @@ class GameEngine:
         next_state.tick += 1
         next_state.events = []
 
+        # 0. Refuel & Upkeep (Fixing stuck units)
+        self._reset_mp_and_upkeep(next_state)
+
         # 1. Indexing
         units_by_id = {u.id: u for u in next_state.you.units}
         unit_positions = defaultdict(list)
@@ -84,6 +94,11 @@ class GameEngine:
         facilities_by_id = {f.id: f for f in next_state.you.facilities}
 
         # 2. Process Orders
+
+        # --- RESEARCH --- (NEW)
+        for player_id, order in orders:
+            if order.type == OrderType.RESEARCH:
+                self._handle_research(player_id, order, next_state)
 
         # --- BUILD ---
         # Strategy: Process builds first so units can't move same turn (unless we change logic)
@@ -114,6 +129,53 @@ class GameEngine:
         self._check_victory(next_state)
 
         return next_state
+
+    # --- New / Updated Logic ---
+
+    def _reset_mp_and_upkeep(self, state: GameState):
+        """Resets MP for all units and handles Fuel upkeep every 10 ticks."""
+        is_upkeep_tick = (state.tick % 10 == 0)
+
+        for unit in state.you.units:
+            # 1. Determine Max MP
+            stats = self._get_unit_stats(unit.type)
+            max_mp = stats["mp"]
+
+            # 2. Handle Upkeep (Fuel Consumption)
+            if is_upkeep_tick and unit.type in UNIT_UPKEEP:
+                cost = UNIT_UPKEEP[unit.type]
+                owner_res = self.player_resources.get(unit.owner)
+
+                if owner_res and owner_res.F >= cost:
+                    owner_res.F -= cost
+                    # Full Refuel
+                    unit.mp = max_mp
+                else:
+                    # Starvation Penalty (-25% Speed -> simplified to 0 or reduced MP)
+                    # For MVP, let's set MP to 0 or 1 to show impact
+                    unit.mp = max(0, int(max_mp * 0.75))
+            else:
+                # Normal Tick: Reset MP
+                unit.mp = max_mp
+
+    def _handle_research(self, player_id: str, order: Order, state: GameState):
+        """Handle Instant Research."""
+        res = self.player_resources.get(player_id, Resources())
+        upgrades = self.player_upgrades[player_id]
+
+        if order.tech_id in upgrades: return
+
+        if res.I >= RESEARCH_COST:
+            res.I -= RESEARCH_COST
+            upgrades.append(order.tech_id)
+            # Update state for client view
+            if state.you.resources: # Just in case
+                 pass # Resources in state are merely a view, real data is in self.player_resources
+
+            state.events.append(Event(
+                type="RESEARCH", loc=HexCoord(q=0, r=0),
+                details={"tech_id": order.tech_id, "owner": player_id}
+            ))
 
     # --- Order Handlers ---
 
@@ -160,21 +222,6 @@ class GameEngine:
             state.events.append(Event(
                 type="BUILD", loc=HexCoord(q=fac.q, r=fac.r),
                 details={"unit": order.unit, "owner": player_id}
-            ))
-
-    def _handle_research(self, player_id: str, order: Order, state: GameState):
-        cost = 200 # MVP fixed cost
-        res = self.player_resources.get(player_id, Resources())
-        upgrades = self.player_upgrades[player_id]
-
-        if order.tech_id in upgrades: return # Already researched
-
-        if res.I >= cost:
-            res.I -= cost
-            upgrades.append(order.tech_id)
-            state.events.append(Event(
-                type="RESEARCH", loc=HexCoord(q=0, r=0),
-                details={"tech_id": order.tech_id, "owner": player_id}
             ))
 
     # --- Movement & Combat ---

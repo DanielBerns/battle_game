@@ -123,6 +123,7 @@ class Bot:
         resources = game_state.you.resources
         my_units = game_state.you.units
         visible_enemies = game_state.visible_changes.units
+        unlocked = game_state.you.unlocked_upgrades # Access unlocked upgrades
 
         # --- LOGGING STATE ---
         logger.info(f"[Tick {game_state.tick}] Resources: M={resources.M} F={resources.F} | My Units: {len(my_units)} | Visible Enemies: {len(visible_enemies)}")
@@ -142,6 +143,12 @@ class Bot:
             strategic_target = Hex(0, 0)
 
         logger.info(f"strategic_target: {str(strategic_target)}")
+
+        # --- 0. Research Logic (NEW) ---
+        if resources.I >= 200 and "INFANTRY_TIER_1" not in unlocked:
+            logger.info("  -> Order: Research INFANTRY_TIER_1")
+            orders.append(Order(type=OrderType.RESEARCH, tech_id="INFANTRY_TIER_1"))
+            resources.I -= 200 # Client-side estimation
 
         # --- 1. Aggressive Build Logic ---
         my_facilities = [f for f in game_state.you.facilities if f.owner == self.my_id]
