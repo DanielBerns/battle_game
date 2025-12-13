@@ -4,7 +4,7 @@ import sys
 import json
 import httpx
 import logging
-from sqlalchemy import create_engine, Column, String, Integer, Float, select, delete
+from sqlalchemy import create_engine, Column, String, Integer, Float
 from sqlalchemy.orm import declarative_base, Session
 
 from shared.schemas import (
@@ -14,6 +14,7 @@ from shared.schemas import (
 from shared.hex_math import Hex, hex_distance, hex_neighbors
 from shared.unique_ids import unique_id
 
+# --- Logging Setup ---
 logger = logging.getLogger("battle_bot")
 logger.setLevel(logging.INFO)
 console_handler = logging.StreamHandler()
@@ -41,6 +42,8 @@ class Bot:
         self.server_url = server_url
         self.match_id = match_id
         self.config_file = config_file
+        self.map_data = None
+
         try:
             with open(config_file, 'r') as f:
                 config = json.load(f)
@@ -50,7 +53,7 @@ class Bot:
             logger.error(f"Failed to load config file {config_file}: {e}")
             sys.exit(1)
 
-        logger.info(f"Initialized Bot {self.derived_id} using config {config_file}")
+        logger.info(f"Initialized Aggressive Bot {self.derived_id} using config {config_file}")
         self.client = httpx.Client(base_url=server_url, timeout=5.0)
         self.engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(self.engine)
@@ -73,7 +76,8 @@ class Bot:
 
         data = MatchStart(**resp.json())
         self.my_id = data.my_id
-        logger.info(f"Connected as {self.my_id}.")
+        self.map_data = data.map
+        logger.info(f"Connected as {self.my_id}. Map size: {self.map_data.width}x{self.map_data.height}")
         self._run_loop()
 
     def _run_loop(self):
@@ -91,70 +95,144 @@ class Bot:
                     continue
 
                 self.last_tick = game_state.tick
-                logger.info(f"Processing Tick {game_state.tick}")
-                self._sync_state(game_state)
+                # logger.info(f"Processing Tick {game_state.tick}")
 
                 orders = self._logic(game_state)
 
-                logger.info(f"len(orders) = {len(orders)}")
                 if orders:
+                    # Log the orders being sent
+                    move_orders = len([o for o in orders if o.type == OrderType.MOVE])
+                    build_orders = len([o for o in orders if o.type == OrderType.BUILD])
+                    logger.info(f"Submitting {len(orders)} orders (Moves: {move_orders}, Builds: {build_orders})")
+
                     submission = OrderSubmission(tick=game_state.tick + 1, orders=orders)
                     self.client.post(
                         f"/match/{self.match_id}/orders",
                         json=submission.model_dump(),
                         headers={"Authorization": self.token}
                     )
+                else:
+                    logger.info("No orders generated this tick.")
+
             except Exception as e:
                 logger.error(f"Error in game loop: {e}", exc_info=True)
                 time.sleep(1)
 
-    def _sync_state(self, state: GameState):
-        self.session.execute(delete(LocalUnit).where(LocalUnit.owner == self.my_id))
-        for u in state.you.units:
-            unit = LocalUnit(id=u.id, owner=self.my_id, type=u.type, q=u.q, r=u.r, hp=u.hp, mp=u.mp)
-            self.session.add(unit)
-        self.session.commit()
-
-    def _logic(self, game_state: GameState):
+    def _logic(self, game_state: GameState) -> list[Order]:
         orders = []
         resources = game_state.you.resources
+        my_units = game_state.you.units
+        visible_enemies = game_state.visible_changes.units
 
-        # --- NEW: Build Logic ---
-        # Strategy: If we have facilities and cash, build armies
+        # --- LOGGING STATE ---
+        logger.info(f"[Tick {game_state.tick}] Resources: M={resources.M} F={resources.F} | My Units: {len(my_units)} | Visible Enemies: {len(visible_enemies)}")
+
+        # Locate Key Units
+        my_chief = next((u for u in my_units if u.type == UnitType.CHIEF), None)
+        enemy_chief = next((u for u in visible_enemies if u.type == UnitType.CHIEF), None)
+
+        logger.info(f"my_chief: {str(my_chief)} - enemy_chief: {str(enemy_chief)}")
+
+        # Calculate strategic direction
+        if my_units:
+            avg_q = sum(u.q for u in my_units) / len(my_units)
+            avg_r = sum(u.r for u in my_units) / len(my_units)
+            strategic_target = Hex(15, 15) if (avg_q + avg_r) < 0 else Hex(-15, -15)
+        else:
+            strategic_target = Hex(0, 0)
+
+        logger.info(f"strategic_target: {str(strategic_target)}")
+
+        # --- 1. Aggressive Build Logic ---
         my_facilities = [f for f in game_state.you.facilities if f.owner == self.my_id]
 
         for fac in my_facilities:
-            # Simple priority: Armored > Light Infantry
             if resources.M >= 120 and resources.F >= 40:
-                logger.info(f"Building ARMORED at {fac.id}")
+                logger.info(f"  -> Order: Build ARMORED at {fac.id}")
                 orders.append(Order(type=OrderType.BUILD, fac_id=fac.id, unit=UnitType.ARMORED))
-                # Deduct locally to avoid double-spend in one tick loop (simple approximation)
                 resources.M -= 120
                 resources.F -= 40
             elif resources.M >= 40:
-                logger.info(f"Building LIGHT_INFANTRY at {fac.id}")
+                logger.info(f"  -> Order: Build INFANTRY at {fac.id}")
                 orders.append(Order(type=OrderType.BUILD, fac_id=fac.id, unit=UnitType.LIGHT_INFANTRY))
                 resources.M -= 40
 
-        # --- Movement Logic ---
-        my_units = self.session.execute(select(LocalUnit).where(LocalUnit.owner == self.my_id)).scalars().all()
-        target_hex = Hex(0, 0)
-
+        # --- 2. Unit Logic ---
         for unit in my_units:
+            logger.info(f"{unit.type} at ({unit.q},{unit.r}) - {unit.hp} - {unit.mp}")
             if unit.mp <= 0: continue
-            my_hex = Hex(unit.q, unit.r)
-            if hex_distance(my_hex, target_hex) <= 1: continue
 
-            best_move = None
-            min_dist = 9999
-            for neighbor in hex_neighbors(my_hex):
-                dist = hex_distance(neighbor, target_hex)
-                if dist < min_dist:
-                    min_dist = dist
-                    best_move = neighbor
+            u_hex = Hex(unit.q, unit.r)
 
-            if best_move:
-                orders.append(Order(type=OrderType.MOVE, id=unit.id, dest=HexCoord(q=best_move.q, r=best_move.r)))
+            # A. Chief Logic (Survival)
+            if unit.type == UnitType.CHIEF:
+                logger.info("Chief unit")
+                threats = [e for e in visible_enemies if hex_distance(u_hex, Hex(e.q, e.r)) <= 4]
+                if threats:
+                    logger.info(f"  -> Threats: {len(threats)}")
+                    # ... (Kiting logic same as before) ...
+                    avg_t_q = sum(e.q for e in threats) / len(threats)
+                    avg_t_r = sum(e.r for e in threats) / len(threats)
+                    threat_center = Hex(int(avg_t_q), int(avg_t_r))
+
+                    best_escape = None
+                    max_dist = -1
+                    for n in hex_neighbors(u_hex):
+                        if any(e.q == n.q and e.r == n.r for e in visible_enemies): continue
+                        d = hex_distance(n, threat_center)
+                        if d > max_dist:
+                            max_dist = d
+                            best_escape = n
+
+                    if best_escape:
+                        orders.append(Order(type=OrderType.MOVE, id=unit.id, dest=HexCoord(q=best_escape.q, r=best_escape.r)))
+                        logger.info(f"  -> Chief fleeing to {best_escape} (away from {len(threats)} threats)")
+                else:
+                    logger.info(f"  -> Chief is safe")
+                continue
+            else:
+                logger.info(f"Other units")
+
+            # B. Combat Logic
+            logger.info("Combat Logic")
+            target_hex = strategic_target
+            target_desc = "Strategic Base"
+
+            if enemy_chief:
+                target_hex = Hex(enemy_chief.q, enemy_chief.r)
+                target_desc = "Enemy Chief"
+                logger.info(f"  -> {str(target_hex)} {target_desc}")
+            elif visible_enemies:
+                closest = min(visible_enemies, key=lambda e: hex_distance(u_hex, Hex(e.q, e.r)))
+                target_hex = Hex(closest.q, closest.r)
+                target_desc = f"Enemy Unit at {target_hex}"
+                logger.info(f"  -> {str(target_hex)} {target_desc} {closest}")
+            else:
+                logger.info(f"  -> {str(target_hex)} {target_desc}")
+
+            # Move towards target
+            logger.info("Move towards target")
+            dist_to_target = hex_distance(u_hex, target_hex)
+            logger.info(f"  -> dist_to_target {dist_to_target}")
+            if dist_to_target > 0:
+                best_move = None
+                min_dist = 9999
+
+                for n in hex_neighbors(u_hex):
+                    d = hex_distance(n, target_hex)
+                    if d < min_dist:
+                        min_dist = d
+                        best_move = n
+
+                if best_move:
+                    orders.append(Order(type=OrderType.MOVE, id=unit.id, dest=HexCoord(q=best_move.q, r=best_move.r)))
+                    # Detailed log for verifying targeting
+                    logger.debug(f"Unit {unit.id} targeting {target_desc} ({dist_to_target} hexes away). Move -> {best_move}")
+                else:
+                     logger.warning(f"Unit {unit.id} STUCK. Target: {target_hex}, Dist: {dist_to_target}")
+            else:
+                logger.info(f"  -> dist_to_target <= 0")
+
         return orders
 
 if __name__ == "__main__":
