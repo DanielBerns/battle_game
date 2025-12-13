@@ -50,7 +50,7 @@ class Resources(BaseModel):
 
 # --- API Payloads ---
 
-class GameInitRequest(BaseModel): # <--- NEW
+class GameInitRequest(BaseModel):
     match_id: str
     initial_resources: Resources
 
@@ -64,6 +64,7 @@ class StaticTerrain(BaseModel):
 class MapData(BaseModel):
     width: int
     height: int
+    radius: Optional[int] = None  # <--- NEW FIELD
     static_terrain: List[StaticTerrain]
 
 class GameConstants(BaseModel):

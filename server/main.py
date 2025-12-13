@@ -14,6 +14,17 @@ from server.engine import GameEngine
 
 CONFIG_DIR = os.getenv("CONFIG_DIR", "configs")
 
+# --- Load Parameters ---
+# We load parameters once at startup to get map configuration
+try:
+    with open(os.path.join(os.path.dirname(__file__), "parameters.json"), "r") as f:
+        PARAMS = json.load(f)
+except FileNotFoundError:
+    print("Warning: parameters.json not found, using defaults.")
+    PARAMS = {"map_radius": 20} # Default
+
+MAP_RADIUS = PARAMS.get("map_radius", 20)
+
 # --- Helpers ---
 def load_game_config(match_id: str):
     path = os.path.join(CONFIG_DIR, f"{match_id}.json")
@@ -70,7 +81,7 @@ def health_check():
 @app.post("/match/init")
 def init_game(payload: GameInitRequest):
     """Dynamically initializes a match with specific resources."""
-    engine = GameEngine(payload.match_id)
+    engine = GameEngine(payload.match_id, map_radius=MAP_RADIUS) # Pass radius
     engine.initialize_dynamic(payload.initial_resources)
 
     games[payload.match_id] = engine
@@ -90,7 +101,7 @@ def start_match(match_id: str):
     if match_id not in games:
         # Auto-init if not exists (fallback)
         print(f"Auto-initializing {match_id} with default resources.")
-        engine = GameEngine(match_id)
+        engine = GameEngine(match_id, map_radius=MAP_RADIUS) # Pass radius
         engine.initialize_dynamic(Resources(M=1000, F=500, I=200))
         games[match_id] = engine
         order_buffers[match_id] = []
@@ -113,7 +124,8 @@ def match_config(match_id: str, request: Request):
     return MatchStart(
         match_id=match_id,
         my_id=player_id,
-        map=MapData(width=20, height=20, static_terrain=[]),
+        # Send radius to client. Width/Height approx can be kept or ignored by client if radius present
+        map=MapData(width=MAP_RADIUS*2, height=MAP_RADIUS*2, radius=MAP_RADIUS, static_terrain=[]),
         constants=GameConstants()
     )
 
