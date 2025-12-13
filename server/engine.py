@@ -9,7 +9,7 @@ from shared.schemas import (
     GameStatus, Event, CombatDetails, UnitType, Resources,
     FacilityState, PlayerState, VisibleChanges
 )
-from shared.hex_math import Hex, hex_neighbors
+from shared.hex_math import Hex, hex_neighbors, hex_distance # Ensure hex_distance is imported
 
 # --- Constants ---
 DEF_CONSTANT = 25
@@ -29,8 +29,9 @@ UNIT_UPKEEP = {
 RESEARCH_COST = 200
 
 class GameEngine:
-    def __init__(self, match_id: str):
+    def __init__(self, match_id: str, map_radius: int = 20):
         self.match_id = match_id
+        self.map_radius = map_radius # <--- Store radius
         # State container
         self.current_state: Optional[GameState] = None
         # Authoritative Resource Store: { "p_red": Resources(...), "p_blue": ... }
@@ -231,12 +232,18 @@ class GameEngine:
                           unit_positions: Dict[Hex, List[UnitState]]):
         intentions: Dict[str, Hex] = {}
         origins: Dict[str, Hex] = {}
+        center_hex = Hex(0, 0) # <--- Center of world
 
         for order in move_orders:
             unit = units_by_id[order.id]
             # Simple Range Check (1 hex)
             target = Hex(order.dest.q, order.dest.r)
             origin = Hex(unit.q, unit.r)
+
+            # --- MAP BOUNDARY CHECK (NEW) ---
+            if hex_distance(center_hex, target) > self.map_radius:
+                # Invalid move (Out of Bounds)
+                continue
 
             # If distance > unit.mp, invalid (Basic check)
             # In full impl, use pathfinding. Here assume adjacency for 1 MP

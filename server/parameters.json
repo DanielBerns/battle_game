@@ -1,4 +1,5 @@
 {
+  "map_radius": 27,
   "resources": {
     "M": 2000,
     "F": 1000,
